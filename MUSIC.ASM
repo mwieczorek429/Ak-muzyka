@@ -11,143 +11,129 @@ start:   mov   ax, _data
    
    
 GETFILE:
-	xor 	cx,cx
-	mov		cl,es:[80h] ;Pod adresem 80h znajduje sie bajt zawierajacy dlugosc parametrow
-	cmp cl,0
+	xor cx,cx
+	mov cl,es:[80h]         ; POD ADRESEM 80h ZNAJDUJE SIE BAJT ZAWIERAJACY DLUGOSC PARAMETROW
+	cmp cl,0                ; SPRAWDZENIE CZY PODANO SCIEZKE DO PLIKU
 	JZ NOFILE
-	dec 	cl ; pomijamy spacje po .exe
-	mov		si,offset fname ;Ustalamy wskaźnik SI na miejsce w pamięci w segmencie danych
-	mov		di,82h ;[80]- byte z dlugoscia, [81]-niechciana spacja, [82+]parametr
+	dec cl                  ; POMIJAMY SPACJE PO .EXE
+	mov si,offset fname     ; USTALAMY WSKAZNIK SI NA MIEJSCE W PAMIECI W SEGMENCIE DANYCH DO KTOREGO BEDZIE ZAPISYWANA SCIEZKA PLIKU  
+	mov di,82h              ; [80]- BYTE Z DLUGOSCIA, [81]-NIECHCIANA SPACJA, [82+]-PARAMETR
 				
-SAVENAME:	;Zapisanie nazwy pliku
-	mov		al,es:[di] ;kopiowaie kazdego znaku do data segment
+SAVENAME:	               ; ZAPISANIE NAZWY PLIKU
+	mov		al,es:[di]     ; KOPIOWANIE KAZDEGO ZNAKU PARAMETRU DO PRZEMIESZCZENIA FNAME W DATA SEGMENT 
 	mov 	ds:[si],al
-	inc		si ;Inkrementuj SI - teraz wskazuje na kolejny bajt do którego ma być skopiowany znak
-	inc		di ;Inkrementuj DI - teraz wskazuje na kolejny znak do skopiowania
-	dec		cl ;Dekrementuj długość stringa
-	jnz		SAVENAME ; jezeli zero to znaczy ze przepisalismy caly parametr
+	inc		si             ; INKREMENTUJ SI - TERAZ WSKAZUJE NA KOLEJNY BAJT DO KTOREGO MA BYC SKOPIOWANY ZNAK  
+	inc		di             ; INKREMENTUJ DI - TERAZ WSKAZUJE NA KOLEJNY ZNAK DO SKOPIOWANIA 
+	dec		cl             ; DEKREMENTUJ DLUGOSC STRINGA 
+	jnz		SAVENAME       ; JEZELI ZERO TO ZNACZY ZE PRZEPISALISMY CALY PARAMETR 
 
 INIT:
-   xor si,si               ; Wyzerowanie si
+   xor si,si               ; WYZEROWANIE SI, DI i DX
    xor di,di
    xor dx,dx
-   mov cx,09h              ; Licznik petli
-   call INIT_OSC
-   call OPENF              ; Otwarcie pliku
-   call ON_SPEAK           ; Wlaczenie glosnika
+   call INIT_CHIP          ; INICJALIZACJA UKLADU 8253
+   call OPENF              ; OTWARCIE PLIKU
+   call ON_SPEAK           ; WLACZENIE GLOSNIKA
 MAIN:
-   call READL              ; Wczytanie linii
-   cmp ax, 'E'
-   jz CLOSE
-   mov dl, [lines+2]         ; Wczytanie czasu
-   sub dl, 48d
-   mov timeH, dx
-   mov cl, [lines+1]       ; Wczytanie oktawy
-   sub cl, 48d             ; Aby oktawa byla liczba
-   mov dl, lines           ; Wczytanie pozycji nuty
-   sub dx,48d              ; Aby wczytana wartosc byla liczba
-   add dx,dx               ; Aby przesuwalo o slowo
-   mov si,dx
-   mov bx, [offset notes + si] ; Czestotliwosc nuty w oktawie 0
-   shr bx,cl               ; Poprawienie czestotliwosci o oktawe, chcac wieksza czestotliwosc mnozymy przez potege 2
-   call CH_FREQ            ; Zmiana czestotliwosci
-   call DELAY              ; Czas trwania dzwieku
-   jmp main
+   call READL              ; WCZYTANIE LINII POD ADRES LINES, CZYLI 4 ZNAKOW: NUTA,OKTAWA,CZAS,ENTER 
+   cmp ax, 'E'             ; KONIEC PLIKU JEST OZNACZONE JAKO 'E' W AX
+   jz CLOSE                ; ZAKONCZ WYKONYWANIE PETLI
+   mov dl, [lines+2]       ; PRZESLANIE CZASU 
+   sub dl, 48d             ; ZAPISANY JEST KOD ASCII, WIEC TRZEBA ODJAC 48
+   mov timeH, dx           ; PRZESLANIE WCZYTANEGO CZASU POD ADRES TIMEH, KTORY JEST WYKORZYSTANY W DELAY
+   mov cl, [lines+1]       ; PRZESLANIE OKTAWY
+   sub cl, 48d             ; ZAMIANA NA LICZBE
+   mov dl, [lines]         ; PRZESLANIE POZYCJI NUTY
+   sub dx,48d              ; ZAMIANA NA LICZBE
+   add dx,dx               ; ABY PRZESUWALO O SLOWO
+   mov si,dx                
+   mov bx, [notes + si]    ; CZESTOTLIWOSC NUTY W OKTAWIE 0
+   shr bx,cl               ; POPRAWIENIE CZESTOTLIWOSCI O OKTAWE, ABY BYLA WIEKSZA CZESTOTLIWOSC MNOZYMY PRZEZ POTEGE 2
+   call CH_FREQ            ; WYWOLANIE ZMIANY CZESTOTLIWOSCI
+   call DELAY              ; ODCZEKAJ O WCZESNIEJ WCZYTANY CZAS
+   jmp main                ; POWTARZANIE ODGRYWANIA TONU AZ NASTAPI KONIEC WCZYTYWANIA PLIKU
    
 CLOSE:
-   call CLOSEF
-   call OFF_SPEAK          ; Wylaczenie glosnika
+   call CLOSEF             ; ZAMKNIECIE PLIKU
+   call OFF_SPEAK          ; WYLACZENIE GLOSNIKA
 
 KONIEC:
    mov   ah, 4ch
    mov   al, 0
    int   21h
-NOFILE:
-	mov  ah,09h
+
+NOFILE:                    ; WYSWIETLENIE INFORMACJI O BRAKU PODANIU NAZWY PLIKU 
+	mov  ah,09h         
 	mov dx,offset empty
 	int 21h
 	jmp KONIEC
 
-;Do Testowania
-LOG:
-   pop dx
-   pop bx
-   push dx
-   mov dx, bx
-   mov ah, 02h
-   int 21h
-   ret
-
-BLAD:
+BLAD:                      
    LEA DX,error
    MOV AH,09h
    INT 21h
    JMP KONIEC
 
 ON_SPEAK:
-   in al, 61h           ; Pobranie bajtu z glosnika
-   or al, 00000011b     ; Ustawienie dwoch najmniej znaczacych bitow, bez zmiany pozostalych
-   out 61h, al          ; Wyslanie bajtu do ukladu, aby uruchomic glosnik
+   in al, 61h              ; POBRANIE BAJTU Z UKLADU, ABY NIE ZMIENIAC BITOW ODPOWIEDZIALNYCH ZA INNE RZECZY
+   or al, 00000011b        ; USTAWIENIE DWOCH NAJMLODSZYCH BITOW ODPOWIEDZIALNYCH ZA WLACZENIE GLOSNIKA(GATE2 I SPEAKER DATA), BEZ ZMIANY POZOSTALYCH
+   out 61h, al             ; WYSLANIE ZMIENIONEGO BAJTU DO UKLADU, CO SPOWODUJE URUCHOMIENIE GLOSNIKA
    ret
 
 OFF_SPEAK:
-   in al, 61h           ; Pobranie bajtu z glosnika
-   AND al, 11111100b    ; Ustawienie dwoch najmniej znaczacych bitow, bez zmiany pozostalych
-   out 61h, al          ; Wyslanie bajtu do ukladu, aby wylaczyc glosnik
+   in al, 61h              ; POBRANIE BAJTU Z UKLADU
+   AND al, 11111100b       ; USTAWIENIE DWOCH NAJMLODSZYCH BITOW ODPOWIEDZIALNYCH ZA WLACZENIE GLOSNIKA, BEZ ZMIANY POZOSTALYCH
+   out 61h, al             ; WYSLANIE BAJTU DO UKLADU, ABY WYLACZYC GLOSNIK 
    ret
 
 DELAY:
-   mov cx, timeH          ; Opoznienie w mikrosekundach w CX:DX (1000000 = 000f4240h, czyli 1s)
-   mov ah, 86h          ; Funkcja wykonuje pusta petle wykonujaca sie CX:DX mikrosekund
-   int 15h              ; Przerwania dodatkowe AT
+   mov cx, timeH           ; OPOZNIENIE W MIKROSEKUNDACH CX:DX (np. 1000000 = 000f4240h, czyli 1s), MY ZMIENIAMY TYLKO CX O WIELOKROTNOSCI 65ms
+   mov ah, 86h             ; FUNKCJA WYKONUJE PUSTA PETLE WYKONUJACA SIE CX:DX MIKROSEKUND 
+   int 15h                 ; PRZERWANIE DODATKOWE AT
    ret
 
-INIT_OSC:
-   mov al, 10110110b    ; Podana liczba inicjalizuje oscylator
-   out 43h, al          ; Inicjalizacja oscylatora
+INIT_CHIP:
+   mov al, 10110110b       ; ZAPISANIE BAJTU STERUJACEGO: B7-6 KANAL 2, B5-4 WCZYTANIE NAJMLODSZY NAJSTARSZY BAJT, B3-1 GENERATOR FALI PROSTOKATNEJ, B0 ZLICZANIE BINARNE
+   out 43h, al             ; PRZESLANIE BAJTU STERUJACEGO DO REJESTRU STERUJACEGO 8253
    ret
 
 CH_FREQ:
-   push ax
-   push bx
-   mov ax, bx           ; W bx jest zapisany dzielnik
-   out 42h, al          
-   mov al, ah
-   out 42h, al
-   pop bx
-   pop ax
+   mov ax, bx              ; W BX JEST ZAPISANY DZIELNIK 
+   out 42h, al             ; PRZESLANIE DZIELNIKA DO LICZNIKA CZESTOTLIWOSCI, NAJPIERW MLODSZY BAJT
+   mov al, ah              ; NASTEPNIE STARSZY BAJT (OUT DZIALA Z REJESTREM AL LUB AX)
+   out 42h, al             
    ret
 
-;Obsluga pliku
+;OBSLUGA PLIKU 
 OPENF:
-   mov dx, offset Fname        ; Zaladowanie adresu nazwy pliku
-   mov al, 0d                  ; Tryb dostepu do pliku (read)
-   mov ah, 3dh                 ; Funkcja otwierania pliku
+   mov dx, offset Fname        ; PRZESLANIE ADRESU NAZWY PLIKU
+   mov al, 0d                  ; TRYB DOSTEPU DO PLIKU (READ)
+   mov ah, 3dh                 ; FUNKCJA OTWIERANIA PLIKU
    int 21h
-   jc BLAD
-   mov handler, ax             ; Przeniesienie numeru dojscia do pliku
+   jc BLAD                     ; USTAWIONA FLAGA C OZNACZA BLAD OTWIERANIA
+   mov handler, ax             ; PRZESLANIE NUMERU DOJSCIA DO PLIKU
    ret
 
 CLOSEF:
-   mov bx, handler             ; Numer dojscia do pliku
-   mov ah, 3eh                 ; Funkcja zamnkniecia pliku
+   mov bx, handler             ; PRZESLANIE NUMERU DOJSCIA DO PLIKU
+   mov ah, 3eh                 ; FUNKCJA ZAMKNIECIA PLIKU
    int 21h
-   jc BLAD
+   jc BLAD                     ; USTAWIONA FLAGA C OZNACZA BLAD ZAMKNIECIA
    ret
 
 READL:
-   mov cx, 4d                   ; Liczba bajtow do przeczytania
-   mov dx, offset lines        ; Adres do ktorego beda wczytywane dane
-   mov bx, handler             ; Numer dojscia do pliku
-   mov ah, 3fh                 ; Funkcja do wczytania cx bajtow do DS:DX
+   mov cx, 4d                  ; USTAWIENIE LICZBY BAJTOW DO PRZECZYTANIA
+   mov dx, offset lines        ; PRZESLANIE ADRESU DO KTOREGO BEDA PRZESYLANE WCZYTANE ZNAKI
+   mov bx, handler             ; USTAWIENIE ADRESU POD KTORYM ZAPISANY ZOSTANIE NUMER DOJSCIA DO PLIKU
+   mov ah, 3fh                 ; FUNKCJA WCZYTUJACA CX BAJTOW DO DS:DX
    int 21h
-   jc BLAD
-   cmp ax,0d                   ; Jesli nie wczytano bajtow, koniec pliku
+   jc BLAD                     ; USTAWIONA FLAGA C OZNACZA BLAD WCZYTANIA
+   cmp ax,0d                   ; NIE WCZYTANO ZADNYCH ZNAKOW, CZYLI KONIEC PLIKU
    jz EOF                      
-   mov ax, 'N'                 ; Jesli nie ma konca pliku ustaw ax na 'N'ext
+   mov ax, 'N'                 ; PRZESLANIE DO AX 'N', ABY WIEDZIEC CZY BYL KONIEC PLIKU
    ret
 EOF:
-   mov ax, 'E'                 ; Koniec pliku ustaw ax na 'E'nd of file
+   mov ax, 'E'                 ; PRZESLANIE DO AX 'E', ABY WIEDZIEC ZE NASTAPIL KONIEC PLIKU
    ret
 
 
@@ -158,7 +144,7 @@ _data segment
    adr dw 1000h
    error db 'BLAD',13,10,'$'
    timeH  dw 0003h
-   notes  dw (1193180/33)      ; Nota C
+   notes  dw (1193180/33)     ; C
          dw (1193180/37)      ; D
          dw (1193180/39)      ; D#
          dw (1193180/41)      ; E
@@ -170,9 +156,9 @@ _data segment
          dw (1193180/62)      ; B
 
    ;Dane zwiazane z obsluga pliku
-   handler dw ?
-   fname db 80h dup(0),'$'
-   lines db 4 dup(?)
+   handler dw ?               ; ZAREZERWOWANIE SLOWA, BEZ INCIJALIZACJI 
+   fname db 80h dup(0),'$'    ; ZAINICJALIZOWANIE 128 BAJTOW ZERAMI
+   lines db 4 dup(?)          ; ZAREZERWOWANIE 4 BAJTOW (DUP, CZYLI DUPLICATE, INACZEJ ? ? ? ?)
    empty db 'Nie podano nazwy pliku',13,10,'$'
    
 _data ends
@@ -182,8 +168,3 @@ _stack segment stack
 _stack ends
 
 end start
-
-
-; Aby uzyskac odpowiednia note, trzeba wyslac do ukladu 8253? dzielnik, ktory poprzez podzielenie czestotliwosci 1,193180 GHZ, wykonuje akcje w czestotliwosci wskazanej noty.
-; Np: Aby uzyskac czestotliwosc nuty C (33Hz), trzeba wyslac: (1193180/33) = 36156 do ukladu 8253. FORMULA: 1193180 / CZESTOTLIWOSC_NUTY
-; Plik ma w kazdym wierszu format: NUTA:OKTAWA:CZAS np: 442 -> Nuta F5,130ms
